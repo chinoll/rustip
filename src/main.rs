@@ -1,13 +1,11 @@
 pub mod tuntap;
 pub mod arp;
+pub mod utils;
 pub use crate::tuntap::*;
 pub use crate::arp::*;
 extern crate libc;
 pub use std::ffi::CString;
 
-extern {
-    fn netdev_init(dev:*mut netdev,addr:*const libc::c_char,fd:libc::c_int);
-}
 fn handle_frame(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {
     let t = hdr.ethertype as i32;
     match t {
@@ -17,20 +15,17 @@ fn handle_frame(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {
     }
 }
 fn main() {
-    let mut net = Box::new(netdev{addr:0,hwaddr:[0;6]});
-    println!("{:?}",*net);
-    unsafe {
-        tuntap_device_init();
-        netdev_init(&mut *net,CString::new("10.0.0.4").expect("CString::new failed").as_ptr(),NETFD);
-        println!("{:?}",*net);
-    }
+    let mut net = netdev{addr:0,hwaddr:[0;6],netfd:0};
+    // net.device_init();
+    net.device_init();
     loop {
         let mut buf:[u8;200] = [0;200];
-        let rret = tun_read(&mut buf);
+        let rret = net.tun_read(&mut buf);
         if rret < 0 {
             println!("rustip:{:?}", Error::last_os_error());
         }
-        let mut hdr = init_eth_hdr(&buf);
-        handle_frame(&mut *net,&mut hdr,&buf[14..]);
+
+        let mut hdr = parse_frame_to_eth(&buf);
+        handle_frame(&mut net,&mut hdr,&buf[14..]);
     }
 }

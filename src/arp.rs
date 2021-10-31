@@ -2,6 +2,7 @@
 pub extern crate arrayref;
 pub use crate::tuntap::*;
 pub use std::mem;
+
 #[derive(Copy, Clone)]
 pub struct ArpCacheEntry {
     pub hwtype:u16,
@@ -25,6 +26,7 @@ pub struct arp_ipv4 {
     dmac:[u8;6],
     dip:u32
 }
+
 const ARP_CACHE_LEN:u32 = 32;
 const ARP_ETHERNET:u16 = 1;
 const ARP_IPV4:u16 = 0x0800;
@@ -68,21 +70,23 @@ fn insert_arp_translation_table(arphdr:&arp_hdr,data:&arp_ipv4) -> i32 {
     }
     -1
 }
-pub fn arp_reply(nd:&netdev,hdr:&mut eth_hdr,arphdr:&mut arp_hdr,buf:&[u8]) {
-    let mut arpdata = unsafe{mem::transmute::<[u8;20],arp_ipv4>(*arrayref::array_ref![buf,0,20])};
+
+pub fn arp_reply(nd:&mut netdev,hdr:&mut eth_hdr,arphdr:&mut arp_hdr,arpdata:&mut arp_ipv4) {
     arpdata.dmac.copy_from_slice(&arpdata.smac);
     arpdata.dip = arpdata.sip;
     arpdata.smac.copy_from_slice(&nd.hwaddr);
-    println!("smac:{:?},dmac:{:?}",arpdata.dmac,arpdata.smac);
     arpdata.sip = nd.addr;
 
     arphdr.opcode = ARP_REPLY.to_be();
     arphdr.hwtype = arphdr.hwtype.to_be();
     arphdr.protype = arphdr.protype.to_be();
-    let frame = [unsafe{any_as_u8_slice(arphdr)},unsafe{any_as_u8_slice(&arpdata)}].concat();
-    netdev_transmit(nd,hdr,libc::ETH_P_ARP.try_into().expect("Error"),&frame,&arpdata.dmac);
+    let mut frame = Vec::new();
+    frame.extend_from_slice(unsafe{any_as_u8_slice(arphdr)});
+    frame.extend_from_slice(unsafe{any_as_u8_slice(arpdata)});
+    nd.transmit(hdr,libc::ETH_P_ARP.try_into().expect("Error"),&frame,&arpdata.dmac);
 }
-pub fn arp_incoming(nd:&netdev,hdr:&mut eth_hdr,buf:&[u8]) {
+
+pub fn arp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {
     let mut arphdr = unsafe{mem::transmute::<[u8;8],arp_hdr>(*arrayref::array_ref![buf,0,8])};
     arphdr.hwtype = arphdr.hwtype.to_be();
     arphdr.protype = arphdr.protype.to_be();
@@ -95,7 +99,7 @@ pub fn arp_incoming(nd:&netdev,hdr:&mut eth_hdr,buf:&[u8]) {
         println!("Unsupported protocol\n");
         return;
     }
-    let arpdata = unsafe{mem::transmute::<[u8;20],arp_ipv4>(*arrayref::array_ref![buf[8..],0,20])};
+    let mut arpdata = unsafe{mem::transmute::<[u8;20],arp_ipv4>(*arrayref::array_ref![buf[8..],0,20])};
     let merge = update_arp_translation_table(&arphdr,&arpdata);
     if nd.addr != arpdata.dip {
         println!("ARP was not for us\n");
@@ -105,7 +109,7 @@ pub fn arp_incoming(nd:&netdev,hdr:&mut eth_hdr,buf:&[u8]) {
         return;
     }
     match arphdr.opcode {
-        ARP_REQUEST => arp_reply(nd,hdr,&mut arphdr,&buf[8..]),
+        ARP_REQUEST => arp_reply(nd,hdr,&mut arphdr,&mut arpdata),
         _ => println!("Opcode not supported\n"),
     }
 }
