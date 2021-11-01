@@ -83,7 +83,7 @@ pub fn arp_reply(nd:&mut netdev,hdr:&mut eth_hdr,arphdr:&mut arp_hdr,arpdata:&mu
     let mut frame = Vec::new();
     frame.extend_from_slice(unsafe{any_as_u8_slice(arphdr)});
     frame.extend_from_slice(unsafe{any_as_u8_slice(arpdata)});
-    nd.transmit(hdr,libc::ETH_P_ARP.try_into().expect("Error"),&frame,&arpdata.dmac);
+    nd.transmit(hdr,libc::ETH_P_ARP.try_into().expect("Error"),&frame);
 }
 
 pub fn arp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {

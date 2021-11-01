@@ -19,7 +19,6 @@ void netdev_init(struct netdev *dev,char *addr,int netfd) {
     struct ifreq ifr;
     unsigned char mac[6] = {0xdc,0x5c,0x27,0x3c,0xb6,0xdd};
     ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
-    // int sock = socket(PF_INET, SOCK_STREAM, 0);
     strcpy((void *)&ifr.ifr_name, "rustip");
     memcpy(&ifr.ifr_hwaddr.sa_data, mac, 6);
     memcpy(&dev->hwaddr,mac,6);

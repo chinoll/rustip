@@ -1,16 +1,20 @@
 pub mod tuntap;
 pub mod arp;
 pub mod utils;
+pub mod ip;
+pub mod icmpv4;
 pub use crate::tuntap::*;
+pub use crate::ip::*;
 pub use crate::arp::*;
 extern crate libc;
 pub use std::ffi::CString;
-
-fn handle_frame(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {
+pub use crate::utils::*;
+fn handle_frame(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
     let t = hdr.ethertype as i32;
     match t {
         libc::ETH_P_ARP => arp_incoming(nd,hdr,buf),
-        libc::ETH_P_IP => println!("Found IPv4\n"),
+        // 0x08 => ip_recv(nd,hdr,buf),
+        libc::ETH_P_IP => ip_recv(nd,hdr,buf),
         _ => println!("Unrecognized ethertype {:?}\n", hdr.ethertype)
     }
 }
@@ -19,13 +23,23 @@ fn main() {
     // net.device_init();
     net.device_init();
     loop {
-        let mut buf:[u8;200] = [0;200];
+        let mut buf:[u8;1500] = [0;1500];
         let rret = net.tun_read(&mut buf);
+        println!("ret:{}",rret);
         if rret < 0 {
             println!("rustip:{:?}", Error::last_os_error());
         }
-
+        // println!("{:?}",buf);
         let mut hdr = parse_frame_to_eth(&buf);
-        handle_frame(&mut net,&mut hdr,&buf[14..]);
+        handle_frame(&mut net,&mut hdr,&mut buf[14..rret as usize]);
     }
 }
+// use chrono::prelude::*;
+
+// extern crate chrono;
+
+// fn main() {
+//     let dt = Local::now();
+//     println!("dt: {}", dt);
+//     println!("dt: {}", dt.timestamp_millis());
+// }

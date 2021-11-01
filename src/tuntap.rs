@@ -42,18 +42,21 @@ impl netdev {
             netdev_init(self,CString::new("10.0.0.4").expect("CString::new failed").as_ptr(),self.netfd);
         }
     }
-    pub fn tun_read(&mut self,buf:&mut [u8;200]) -> i32 {
-        unsafe{libc::read(self.netfd,buf as *mut _ as *mut libc::c_void,200).try_into().unwrap()}
+    pub fn tun_read(&mut self,buf:&mut [u8;1500]) -> i32 {
+        unsafe{libc::read(self.netfd,buf as *mut _ as *mut libc::c_void,1500).try_into().unwrap()}
     }
 
     fn tun_write(&mut self,buf:&[u8],len:u32) -> i32 {
         unsafe{libc::write(self.netfd,buf as *const _ as *const libc::c_void,len as usize).try_into().unwrap()}
     }
     
-    pub fn transmit(&mut self,hdr:&mut eth_hdr,ethertype:u16,frame:&Vec<u8>,dst:&[u8;6]) {
+    pub fn transmit(&mut self,hdr:&mut eth_hdr,ethertype:u16,frame:&Vec<u8>) {
+        
         hdr.ethertype = ethertype.to_be();
+        let smac = hdr.smac;
         hdr.smac.copy_from_slice(&self.hwaddr);
-        hdr.dmac.copy_from_slice(dst);
+        hdr.dmac.copy_from_slice(&smac);
+        println!("smac:{:?},dmac:{:?}",hdr.smac,hdr.dmac);
         let mut eth_frame = Vec::new();
         eth_frame.extend_from_slice(unsafe{any_as_u8_slice(hdr)});
         eth_frame.extend(frame);
