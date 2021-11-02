@@ -7,7 +7,7 @@ pub use libc::c_void;
 pub use std::{io::Error,ffi::CString,mem,process::Command};
 pub use crate::utils::*;
 extern {
-    fn netdev_init(dev:*mut netdev,addr:*const libc::c_char,fd:libc::c_int);
+    fn netdev_init(dev:*mut netdev,addr:*const libc::c_char,hwaddr:*const libc::c_char);
 }
 
 pub const TUNSETIFF:u64 = 1074025674;
@@ -37,9 +37,10 @@ impl netdev {
         }
         Command::new("ip").arg("link").arg("set").arg("rustip").arg("up").status().expect("Error");
         Command::new("ip").arg("route").arg("add").arg("dev").arg("rustip").arg("10.0.0.0/24").status().expect("Error");
+        Command::new("ip").arg("address").arg("add").arg("dev").arg("rustip").arg("local").arg("10.0.0.5/24").status().expect("Error");
         self.netfd = fd;
         unsafe {
-            netdev_init(self,CString::new("10.0.0.4").expect("CString::new failed").as_ptr(),self.netfd);
+            netdev_init(self,CString::new("10.0.0.4").expect("CString::new failed").as_ptr(),CString::new("00:0c:29:6d:50:25").expect("CString::new failed").as_ptr());
         }
     }
     pub fn tun_read(&mut self,buf:&mut [u8;1500]) -> i32 {
@@ -56,7 +57,6 @@ impl netdev {
         let smac = hdr.smac;
         hdr.smac.copy_from_slice(&self.hwaddr);
         hdr.dmac.copy_from_slice(&smac);
-        println!("smac:{:?},dmac:{:?}",hdr.smac,hdr.dmac);
         let mut eth_frame = Vec::new();
         eth_frame.extend_from_slice(unsafe{any_as_u8_slice(hdr)});
         eth_frame.extend(frame);
@@ -65,6 +65,7 @@ impl netdev {
 }
 
 #[repr(C, packed)]
+#[derive(Clone,Copy)]
 pub struct eth_hdr {
     pub dmac:[u8;6],
     pub smac:[u8;6],
