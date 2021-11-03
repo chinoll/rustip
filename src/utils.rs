@@ -16,7 +16,6 @@ pub fn sizeof<T:Sized>() -> i32 {
 }
 pub fn checksum(data:&[u16],mut count:u16) -> u16 {
     let mut sum:u32 = 0;
-    // let mut i = data.len();
     let mut j = 0;
     while count > 1 {
         sum += data[j] as u32;

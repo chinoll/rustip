@@ -13,14 +13,12 @@ fn handle_frame(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
     let t = hdr.ethertype as i32;
     match t {
         libc::ETH_P_ARP => arp_incoming(nd,hdr,buf),
-        // 0x08 => ip_recv(nd,hdr,buf),
         libc::ETH_P_IP => ip_recv(nd,hdr,buf),
         _ => println!("Unrecognized ethertype {:?}\n", hdr.ethertype)
     }
 }
 fn main() {
     let mut net = netdev{addr:0,hwaddr:[0;6],netfd:0};
-    // net.device_init();
     net.device_init();
     loop {
         let mut buf:[u8;1500] = [0;1500];
@@ -29,17 +27,7 @@ fn main() {
         if rret < 0 {
             println!("rustip:{:?}", Error::last_os_error());
         }
-        // println!("{:?}",buf);
         let mut hdr = parse_frame_to_eth(&buf);
         handle_frame(&mut net,&mut hdr,&mut buf[14..rret as usize]);
     }
 }
-// use chrono::prelude::*;
-
-// extern crate chrono;
-
-// fn main() {
-//     let dt = Local::now();
-//     println!("dt: {}", dt);
-//     println!("dt: {}", dt.timestamp_millis());
-// }
