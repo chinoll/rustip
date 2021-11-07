@@ -1,3 +1,4 @@
+#[warn(temporary_cstring_as_ptr)]
 pub extern crate libc;
 pub extern crate arrayref;
 
@@ -24,6 +25,7 @@ impl netdev {
     pub fn device_init(&mut self) {
         let fd = unsafe{libc::open(CString::new("/dev/net/tun").expect("CString::new failed").as_ptr(),libc::O_RDWR)};
         if fd == -1 {
+            println!("open /dev/net/tun failed");
             println!("rustip:{:?}", Error::last_os_error());
             std::process::exit(1);
         }

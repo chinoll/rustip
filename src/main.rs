@@ -3,6 +3,7 @@ pub mod arp;
 pub mod utils;
 pub mod ip;
 pub mod icmpv4;
+pub mod tcp;
 pub use crate::tuntap::*;
 pub use crate::ip::*;
 pub use crate::arp::*;

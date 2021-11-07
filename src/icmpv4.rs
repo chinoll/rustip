@@ -30,10 +30,10 @@ pub fn icmpv4_reply(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,icmp:&mut icmp
     icmp.csum = 0;
     icmp.icmp_type = ICMP_V4_REPLY;
     let (_head,body,_tail) = unsafe{buf.align_to::<u16>()};
-    icmp.csum = checksum(&[&unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)},body].concat(), ih.len - (ih.get_ihl() as u16 * 4));
+    icmp.csum = checksum(&[&unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)},body].concat(), ih.len - (ih.get_ihl() as u16 * 4),0);
 
     let icmp_echo = unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)};
     ih.proto = ICMPV4;
     let mut frame = [unsafe{any_as_u8_slice(&icmp_echo)},buf].concat();
-    ip_send(nd,hdr,ih,&mut frame);
+    ip_send(nd,hdr,ih,&mut frame,ICMPV4);
 }

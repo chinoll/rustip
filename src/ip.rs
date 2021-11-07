@@ -2,6 +2,7 @@ extern crate libc;
 pub use crate::tuntap::*;
 pub use crate::icmpv4::*;
 pub use crate::tuntap::*;
+pub use crate::tcp::*;
 #[repr(C, packed)]
 pub struct iphdr {
     pub ver_and_ihl:u8,
@@ -16,7 +17,7 @@ pub struct iphdr {
     pub daddr:u32
 }
 const IPV4:u8 = 0x04;
-const IP_TCP:u8 = 0x06;
+pub const IP_TCP:u8 = 0x06;
 pub const ICMPV4:u8 = 0x01;
 
 impl iphdr {
@@ -60,26 +61,28 @@ pub fn ip_recv(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
         return;
     }
     let x = ip_hdr.get_ihl() as u16;
-    if checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4) != 0 {
-        println!("checksum error {:?} {:?}",checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4),ip_hdr.csum);
+    if checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4,0) != 0 {
+        println!("checksum error {:?} {:?}",checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4,0),ip_hdr.csum);
         // return -1;
         return;
     }
     ip_hdr.len = ip_hdr.len.to_be();
+    println!("saddr:{},daddr:{}",ip_hdr.saddr,ip_hdr.daddr);
     match ip_hdr.proto {
         ICMPV4 => icmpv4_incoming(nd,hdr,&mut ip_hdr,&mut buf[s..]),
+        IP_TCP => tcp_incoming(nd,hdr,&mut ip_hdr,&mut buf[s..]),
         _ => println!("protoctl no!")
     }
     return
 }
 
-pub fn ip_send(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8]) {
+pub fn ip_send(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8],proto:u8) {
     ih.set_ihl(0x05);
     ih.tos = 0;
     ih.len = sizeof::<iphdr>() as u16 + buf.len() as u16;
     ih.set_offset(0x4000);
     ih.ttl = 64;
-    ih.proto = ICMPV4;
+    ih.proto = proto;
 
     let daddr = ih.saddr;
     ih.saddr = ih.daddr;
@@ -87,6 +90,6 @@ pub fn ip_send(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8]) {
     ih.len = ih.len.to_be();
     ih.csum = 0;
     ih.flag_and_offset = ih.flag_and_offset.to_be();
-    ih.csum = checksum(unsafe{any_as_u16_slice(ih)}, 20);
+    ih.csum = checksum(unsafe{any_as_u16_slice(ih)}, 20,0);
     nd.transmit(hdr,libc::ETH_P_IP as u16,&[unsafe{any_as_u8_slice(ih)},buf].concat());
 }
