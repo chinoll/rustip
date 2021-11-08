@@ -33,7 +33,6 @@ pub fn checksum(data:&[u16],mut count:u16,s:u32) -> u16 {
 
 pub fn tcp_checksum(data:&[u16],saddr:u32,daddr:u32,len:u16) -> u16 {
     let sum:u32 = saddr + daddr + (0x06 as u16).to_be() as u32 + len.to_be() as u32;
-    println!("len:{:x},{}",len,data.len());
     checksum(data, len,sum)
 }
 pub fn ip_port_tostring(addr:u32,port:u16) -> String {

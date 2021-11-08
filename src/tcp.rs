@@ -7,6 +7,7 @@ use lazy_static::lazy_static;
 use std::sync::Mutex;
 
 #[repr(C,packed)]
+#[derive(Debug)]
 pub struct tcp {
     pub src: u16,
     pub dst: u16,
@@ -56,6 +57,9 @@ fn get_status(s:&String) -> u8 {
     *tcp_status_machine.lock().unwrap().get(s).unwrap()
 }
 fn set_status(s:String,status:u8) {
+    tcp_status_machine.lock().unwrap().insert(s,status);
+}
+fn set_status2(s:String,status:u8) {
     tcp_status_machine.lock().unwrap().entry(s).or_insert(status);
 }
 pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8]) {
@@ -64,7 +68,7 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
     let mut tcp_opt = &buf[20..(tcp_opt_len + 20) as usize];
     let mut tcp_opt_ptr:i32 = 0;
     let (_head,body,_tail) = unsafe{buf.align_to::<u16>()};
-    if tcp_checksum(body, ih.saddr, ih.daddr, ((tcp.offset >> 4) *4) as u16) != 0 {
+    if tcp_checksum(body, ih.saddr, ih.daddr, buf.len() as u16) != 0 {
         println!("TCP checksum error");
         return;
     }
@@ -72,40 +76,40 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
     while tcp_opt_ptr < tcp_opt_len {
         let mut tcp_opti = Box::new(tcp_option{kind:0,option:option{eol:0}});
         unsafe {
-            println!("{}",tcp_opt[tcp_opt_ptr as usize]);
+            // println!("{}",tcp_opt[tcp_opt_ptr as usize]);
             match tcp_opt[tcp_opt_ptr as usize] {
                 1 => {
                     tcp_opti.option.eol = 0;
-                    println!("EOL");
+                    // println!("EOL");
                 }
                 0 => {
                     tcp_opti.option.nop = 0;
-                    println!("NOP");
+                    // println!("NOP");
                 }
                 2 => {
                     tcp_opti.option.mss = [tcp_opt[tcp_opt_ptr as usize],tcp_opt[(tcp_opt_ptr + 1) as usize],tcp_opt[(tcp_opt_ptr + 2) as usize]];
                     tcp_opt_ptr += 3;
-                    println!("MSS");
+                    // println!("MSS");
                 }
                 3 => {
                     tcp_opti.option.wscale = [tcp_opt[(tcp_opt_ptr) as usize],tcp_opt[(tcp_opt_ptr+1) as usize]];
                     tcp_opt_ptr += 2;
-                    println!("WSCALE");
+                    // println!("WSCALE");
                 }
                 8 => {
                     tcp_opti.option.timestamp.copy_from_slice(&tcp_opt[(tcp_opt_ptr as usize)..(tcp_opt_ptr + 10) as usize]);
                     tcp_opt_ptr += 10;
-                    println!("TIMESTAMP");
+                    // println!("TIMESTAMP");
                 }
                 _ => {
                     tcp_opt_ptr += tcp_opt[(tcp_opt_ptr + 1) as usize] as i32 - 1;
-                    println!("UNKNOWN");
+                    // println!("UNKNOWN");
                 }
             }
         }
         tcp_opt_ptr += 1;
     }
-    set_status(ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be()), STATUS_LISTEN);
+    set_status2(ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be()), STATUS_LISTEN);
     if tcp.flags == SYN && get_status(&ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be())) == STATUS_LISTEN {
         let dst = tcp.src;
         tcp.src = tcp.dst;
@@ -119,9 +123,24 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
 
         tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,((tcp.offset >> 4) << 2) as u16);
         let mut buf = [&unsafe{any_as_u8_slice(&tcp)},&buf[20..]].concat();
+        set_status(ip_port_tostring(ih.saddr.to_be(),tcp.dst.to_be()), STATUS_RECV);
         ip_send(nd, hdr, ih, &mut buf, IP_TCP);
-        set_status(ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be()), STATUS_RECV);
     } else if tcp.flags == ACK && get_status(&ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be())) == STATUS_RECV {
         set_status(ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be()), STATUS_ESTABLISHED);
+    } else if tcp.flags == PSH | ACK && get_status(&ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be())) == STATUS_ESTABLISHED {
+        let dst = tcp.src;
+        tcp.src = tcp.dst;
+        tcp.dst = dst;
+        let data_len = buf[((tcp.offset >> 4)*4) as usize..].len() as u32;
+        let ack = tcp.ack;
+        tcp.ack = (tcp.seq.to_be() + data_len).to_be();
+        tcp.seq = ack;
+        tcp.flags = ACK;
+        tcp.checksum = 0;
+        let dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
+        let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
+        tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
+        let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
+        ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
     }
 }
