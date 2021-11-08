@@ -142,5 +142,34 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
         tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
         let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
         ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
+    } else if tcp.flags == FIN | ACK && get_status(&ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be())) == STATUS_ESTABLISHED {
+        let dst = tcp.src;
+        tcp.src = tcp.dst;
+        tcp.dst = dst;
+        let ack = tcp.ack;
+        tcp.ack = (tcp.seq.to_be() + 1).to_be();
+        tcp.seq = ack;
+        tcp.flags = ACK;
+        tcp.checksum = 0;
+        //被动关闭
+        let dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
+        let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
+        tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
+        let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
+        set_status(ip_port_tostring(ih.saddr.to_be(),tcp.dst.to_be()), STATUS_LISTEN);
+        ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
+
+        //主动关闭
+        //因为IP地址在上一个ip_send中已经被改变了，所以这里要重新设置IP地址
+        let daddr = ih.saddr;
+        ih.saddr = ih.daddr;
+        ih.daddr = daddr;
+        tcp.flags = FIN | ACK;
+        let dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
+        let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
+        tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
+        let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
+        ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
     }
+
 }
