@@ -15,7 +15,7 @@ pub const TUNSETIFF:u64 = 1074025674;
 const _BUFLEN:i32 = 1500;
 
 #[repr(C, packed)]
-#[derive(Debug)]
+#[derive(Debug,Copy,Clone)]
 pub struct netdev {
     pub addr:u32,
     pub hwaddr:[u8;6],

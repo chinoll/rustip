@@ -19,7 +19,7 @@ pub struct iphdr {
 const IPV4:u8 = 0x04;
 pub const IP_TCP:u8 = 0x06;
 pub const ICMPV4:u8 = 0x01;
-
+static mut id:u16 = 7890;
 impl iphdr {
     pub fn get_verison(&mut self) -> u8 {
         (self.ver_and_ihl & 0xf0) >> 4
@@ -63,17 +63,14 @@ pub fn ip_recv(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
     let x = ip_hdr.get_ihl() as u16;
     if checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4,0) != 0 {
         println!("checksum error {:?} {:?}",checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4,0),ip_hdr.csum);
-        // return -1;
         return;
     }
     ip_hdr.len = ip_hdr.len.to_be();
-    println!("saddr:{},daddr:{}",ip_hdr.saddr,ip_hdr.daddr);
     match ip_hdr.proto {
         ICMPV4 => icmpv4_incoming(nd,hdr,&mut ip_hdr,&mut buf[s..]),
         IP_TCP => tcp_incoming(nd,hdr,&mut ip_hdr,&mut buf[s..]),
         _ => println!("protoctl no!")
     }
-    return
 }
 
 pub fn ip_send(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8],proto:u8) {
@@ -83,7 +80,9 @@ pub fn ip_send(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8],proto
     ih.set_offset(0x4000);
     ih.ttl = 64;
     ih.proto = proto;
-
+    unsafe{ih.id = id;}
+    ih.id = ih.id.to_be();
+    unsafe{id += 1;}
     let daddr = ih.saddr;
     ih.saddr = ih.daddr;
     ih.daddr = daddr;
