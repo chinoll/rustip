@@ -2,7 +2,9 @@
 pub extern crate arrayref;
 pub use crate::tuntap::*;
 pub use std::mem;
-
+pub use lazy_static::lazy_static;
+pub use std::sync::Mutex;
+pub use std::collections::HashMap;
 #[derive(Copy, Clone)]
 pub struct ArpCacheEntry {
     pub hwtype:u16,
@@ -27,51 +29,37 @@ pub struct arp_ipv4 {
     dip:u32
 }
 
-const ARP_CACHE_LEN:u32 = 32;
 const ARP_ETHERNET:u16 = 1;
 const ARP_IPV4:u16 = 0x0800;
 const ARP_REQUEST:u16 = 0x0001;
 const ARP_REPLY:u16 = 0x0002;
-const ARP_FREE:u32 = 0;
 const ARP_RESOLVE:u32 = 2;
 const _ARP_WAITING:u32 = 1;
 
-static mut ARP_ENTRY:[ArpCacheEntry;ARP_CACHE_LEN as usize]=[ArpCacheEntry{hwtype:0,sip:0,smac:[0;6],state:0};ARP_CACHE_LEN as usize];
-fn update_arp_translation_table(hdr:&arp_hdr,data:&arp_ipv4) -> u32 {
-    let mut i:u32 = 0;
-    unsafe {
-        while i < ARP_CACHE_LEN {
-            if ARP_ENTRY[i as usize].state == ARP_FREE {
-                i += 1;
-                continue;
-            }
-            if ARP_ENTRY[i as usize].hwtype == hdr.hwtype && ARP_ENTRY[i as usize].sip == data.sip {
-                ARP_ENTRY[i as usize].smac.copy_from_slice(&data.smac);
-                return 1;
-            }
-            i += 1;
-        }
-    }
-    0
+lazy_static! {
+    static ref ARP_ENTRY:Mutex<HashMap<u32,ArpCacheEntry>> = Mutex::new(HashMap::new());
 }
-fn insert_arp_translation_table(arphdr:&arp_hdr,data:&arp_ipv4) -> i32 {
-    let mut i:u32 = 0;
-    unsafe {
-        while i < ARP_CACHE_LEN {
-            if ARP_ENTRY[i as usize].state == ARP_FREE {
-                ARP_ENTRY[i as usize].state = ARP_RESOLVE;
-                ARP_ENTRY[i as usize].hwtype = arphdr.hwtype;
-                ARP_ENTRY[i as usize].sip = data.sip;
-                ARP_ENTRY[i as usize].smac.copy_from_slice(&data.smac);
-                return 0;
-            }
-            i += 1;
-        }
+fn insert_arp_translation_table(arphdr:&arp_hdr,data:&arp_ipv4) {
+    let mut arp = ArpCacheEntry {
+        state:ARP_RESOLVE,
+        hwtype:arphdr.hwtype,
+        sip:data.sip,
+        smac:[0;6]
+    };
+    arp.smac.copy_from_slice(&data.smac);
+    println!("arp:{}",ip_port_tostring(data.sip.to_be(),(80 as u16).to_be()));
+    ARP_ENTRY.lock().unwrap().entry(data.sip).or_insert(arp);
+}
+pub fn ip_to_mac(sip:u32) -> Option<[u8;6]> {
+    println!("qarp:{}",ip_port_tostring(sip,(80 as u16).to_be()));
+    match ARP_ENTRY.lock().unwrap().get(&sip) {
+        Some(i) => Some(i.smac),
+        None => None
     }
-    -1
+
 }
 
-pub fn arp_reply(nd:&mut netdev,hdr:&mut eth_hdr,arphdr:&mut arp_hdr,arpdata:&mut arp_ipv4) {
+fn arp_reply(nd:&mut netdev,arphdr:&mut arp_hdr,arpdata:&mut arp_ipv4) {
     arpdata.dmac.copy_from_slice(&arpdata.smac);
     arpdata.dip = arpdata.sip;
     arpdata.smac.copy_from_slice(&nd.hwaddr);
@@ -83,10 +71,10 @@ pub fn arp_reply(nd:&mut netdev,hdr:&mut eth_hdr,arphdr:&mut arp_hdr,arpdata:&mu
     let mut frame = Vec::new();
     frame.extend_from_slice(unsafe{any_as_u8_slice(arphdr)});
     frame.extend_from_slice(unsafe{any_as_u8_slice(arpdata)});
-    nd.transmit(hdr,libc::ETH_P_ARP.try_into().expect("Error"),&frame);
+    nd.transmit(libc::ETH_P_ARP.try_into().expect("Error"),&frame,arpdata.dip);
 }
 
-pub fn arp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {
+pub fn arp_incoming(nd:&mut netdev,buf:&[u8]) {
     let mut arphdr = unsafe{mem::transmute::<[u8;8],arp_hdr>(*arrayref::array_ref![buf,0,8])};
     arphdr.hwtype = arphdr.hwtype.to_be();
     arphdr.protype = arphdr.protype.to_be();
@@ -100,16 +88,13 @@ pub fn arp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,buf:&[u8]) {
         return;
     }
     let mut arpdata = unsafe{mem::transmute::<[u8;20],arp_ipv4>(*arrayref::array_ref![buf[8..],0,20])};
-    let merge = update_arp_translation_table(&arphdr,&arpdata);
+    insert_arp_translation_table(&arphdr,&arpdata);
     if nd.addr != arpdata.dip {
         println!("ARP was not for us\n");
     }
-    if merge == 0 &&  insert_arp_translation_table(&arphdr,&arpdata) != 0 {
-        println!("ERR: No free space in ARP translation table\n");
-        return;
-    }
     match arphdr.opcode {
-        ARP_REQUEST => arp_reply(nd,hdr,&mut arphdr,&mut arpdata),
+        ARP_REQUEST => arp_reply(nd,&mut arphdr,&mut arpdata),
+        ARP_REPLY => insert_arp_translation_table(&arphdr,&arpdata),
         _ => println!("Opcode not supported\n"),
     }
 }

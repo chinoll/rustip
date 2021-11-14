@@ -17,15 +17,15 @@ pub struct icmpv4_echo {
 const ICMP_V4_ECHO:u8 = 0x08;
 const ICMP_V4_REPLY:u8 = 0x00;
 
-pub fn icmpv4_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8]) {
+pub fn icmpv4_incoming(nd:&mut netdev,ih:&mut iphdr,buf:&mut [u8]) {
     let mut icmp_frame = unsafe{mem::transmute::<[u8;4],icmpv4>(*arrayref::array_ref![buf,0,4])};
     match icmp_frame.icmp_type {
-        ICMP_V4_ECHO => icmpv4_reply(nd,hdr,ih,&mut icmp_frame,&mut buf[4..]),
+        ICMP_V4_ECHO => icmpv4_reply(nd,ih,ih.saddr,&mut icmp_frame,&mut buf[4..]),
         _ => println!("Error!")
     }
 }
 
-pub fn icmpv4_reply(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,icmp:&mut icmpv4,buf:&mut [u8]) {
+pub fn icmpv4_reply(nd:&mut netdev,ih:&mut iphdr,daddr:u32,icmp:&mut icmpv4,buf:&mut [u8]) {
     icmp.code = 0;
     icmp.csum = 0;
     icmp.icmp_type = ICMP_V4_REPLY;
@@ -33,7 +33,6 @@ pub fn icmpv4_reply(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,icmp:&mut icmp
     icmp.csum = checksum(&[&unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)},body].concat(), ih.len - (ih.get_ihl() as u16 * 4),0);
 
     let icmp_echo = unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)};
-    ih.proto = ICMPV4;
     let mut frame = [unsafe{any_as_u8_slice(&icmp_echo)},buf].concat();
-    ip_send(nd,hdr,ih,&mut frame,ICMPV4);
+    ip_send(nd,daddr,ICMPV4,&mut frame);
 }

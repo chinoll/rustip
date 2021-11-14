@@ -1,11 +1,11 @@
 pub use crate::ip::*;
 pub use crate::utils::*;
-use std::collections::HashMap;
 extern crate arrayref;
 pub use rand::Rng;
-use lazy_static::lazy_static;
-use std::sync::Mutex;
-use std::{thread, time::Duration};
+pub use lazy_static::lazy_static;
+pub use std::sync::Mutex;
+pub use std::{thread, time::Duration};
+pub use std::collections::HashMap;
 
 #[repr(C,packed)]
 #[derive(Debug)]
@@ -20,102 +20,101 @@ pub struct tcp {
     pub checksum: u16,
     pub urg: u16,
 }
-pub union option {
+pub union Option {
     pub eol: u8,
     pub nop: u8,
     pub mss:[u8;3],
     pub wscale: [u8;2],
     pub timestamp: [u8; 10],
 }
-pub struct tcp_option {
+pub struct TcpOption {
     pub kind: u8,
-    pub option: option
+    pub option: Option
 }
 #[derive(Copy,Clone,Debug)]
-pub struct tcp_seq_ack {
+pub struct TcpSeqAck {
     seq:u32,
     ack:u32,
     status:u8,
     port:u16
 }
 const STATUS_RECV:u8 = 1;
-const STATUS_SYN_SEND:u8 = 2;
+const _STATUS_SYN_SEND:u8 = 2;
 const STATUS_ESTABLISHED:u8 = 3;
-const STATUS_FIN_WAIT_1:u8 = 4;
-const STATUS_FIN_WAIT_2:u8 = 5;
-const STATUS_CLOSE_WAIT:u8 = 6;
-const STATUS_CLOSING:u8 = 7;
-const STATUS_LAST_ACK:u8 = 8;
-const STATUS_TIME_WAIT:u8 = 9;
-const STATUS_CLOSED:u8 = 10;
+const _STATUS_FIN_WAIT_1:u8 = 4;
+const _STATUS_FIN_WAIT_2:u8 = 5;
+const _STATUS_CLOSE_WAIT:u8 = 6;
+const _STATUS_CLOSING:u8 = 7;
+const _STATUS_LAST_ACK:u8 = 8;
+const _STATUS_TIME_WAIT:u8 = 9;
+const _STATUS_CLOSED:u8 = 10;
 const STATUS_LISTEN:u8 = 11;
 const STATUS_WAIT_ACK:u8 = 12;
 
 const ACK:u8 = 0x10;
 const SYN:u8 = 0x02;
 const FIN:u8 = 0x01;
-const RST:u8 = 0x04;
+const _RST:u8 = 0x04;
 const PSH:u8 = 0x08;
-const URG:u8 = 0x20;
-const SYN_ACK:u8 = 0x12;
+const _URG:u8 = 0x20;
+const _SYN_ACK:u8 = 0x12;
 lazy_static! {
-    static ref tcp_status_machine:Mutex<HashMap<String,tcp_seq_ack>> = Mutex::new(HashMap::new());
+    static ref TCP_STATUS_MACHINE:Mutex<HashMap<String,TcpSeqAck>> = Mutex::new(HashMap::new());
 }
 fn get_status(s:&String) -> u8 {
-    tcp_status_machine.lock().unwrap().get(s).unwrap().status
+    TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap().status
 }
 fn set_status(s:&String,status:u8) {
-    let mut map = *tcp_status_machine.lock().unwrap().get(s).unwrap();
+    let mut map = *TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap();
     map.status = status;
-    tcp_status_machine.lock().unwrap().insert(s.to_string(),map);
+    TCP_STATUS_MACHINE.lock().unwrap().insert(s.to_string(),map);
 }
 fn init_status(s:&String) {
-    tcp_status_machine.lock().unwrap().entry(s.to_string()).or_insert(tcp_seq_ack{seq:0,ack:0,status:STATUS_LISTEN,port:0});
+    TCP_STATUS_MACHINE.lock().unwrap().entry(s.to_string()).or_insert(TcpSeqAck{seq:0,ack:0,status:STATUS_LISTEN,port:0});
 }
 fn set_seq(s:&String,seq:u32) {
-    let mut map = *tcp_status_machine.lock().unwrap().get(s).unwrap();
+    let mut map = *TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap();
     map.seq = seq;
-    tcp_status_machine.lock().unwrap().insert(s.to_string(),map);
+    TCP_STATUS_MACHINE.lock().unwrap().insert(s.to_string(),map);
 }
 fn set_ack(s:&String,ack:u32) {
-    let mut map = *tcp_status_machine.lock().unwrap().get(s).unwrap();
+    let mut map = *TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap();
     map.ack = ack;
-    tcp_status_machine.lock().unwrap().insert(s.to_string(),map);
+    TCP_STATUS_MACHINE.lock().unwrap().insert(s.to_string(),map);
 }
 fn get_seq(s:&String) -> u32 {
-    tcp_status_machine.lock().unwrap().get(s).unwrap().seq
+    TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap().seq
 }
 fn get_ack(s:&String) -> u32 {
-    tcp_status_machine.lock().unwrap().get(s).unwrap().ack
+    TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap().ack
 }
 fn set_port(s:&String,port:u16) {
-    let mut p = *(tcp_status_machine.lock().unwrap().get(s).unwrap());
+    let mut p = *(TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap());
     p.port = port;
-    tcp_status_machine.lock().unwrap().insert(s.to_string(),p);
+    TCP_STATUS_MACHINE.lock().unwrap().insert(s.to_string(),p);
 }
 fn get_port(s:&String) -> u16 {
-    tcp_status_machine.lock().unwrap().get(s).unwrap().port
+    TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap().port
 }
 
-pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8]) {
+pub fn tcp_incoming(nd:&mut netdev,ih:&mut iphdr,buf:&mut [u8]) {
     let mut tcp = unsafe { mem::transmute::<[u8;20],tcp>(*arrayref::array_ref![buf,0,20]) };
-    let mut tcp_opt_len = ((tcp.offset >> 4)*4 - 20) as i32;
-    let mut tcp_opt = &buf[20..(tcp_opt_len + 20) as usize];
+    let tcp_opt_len = ((tcp.offset >> 4)*4 - 20) as i32;
+    let tcp_opt = &buf[20..(tcp_opt_len + 20) as usize];
     let mut tcp_opt_ptr:i32 = 0;
     let (_head,body,_tail) = unsafe{buf.align_to::<u16>()};
+    let ip = ih.saddr;
     let port = tcp.src.to_be();
     if tcp_checksum(body, ih.saddr, ih.daddr, buf.len() as u16) != 0 {
         println!("TCP checksum error");
         return;
     }
     let ip_port = ip_port_tostring(ih.saddr.to_be(),port);
-    println!("TCP incoming {}",ip_port);
     init_status(&ip_port);
-    let ip = ih.saddr;
     set_port(&ip_port, port);
     let mut timestamp = [0u8;10];
     while tcp_opt_ptr < tcp_opt_len {
-        let mut tcp_opti = Box::new(tcp_option{kind:0,option:option{eol:0}});
+        let mut tcp_opti = Box::new(TcpOption{kind:0,option:Option{eol:0}});
         unsafe {
             match tcp_opt[tcp_opt_ptr as usize] {
                 1 => {
@@ -144,7 +143,7 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
         }
         tcp_opt_ptr += 1;
     }
-    let status = get_status(&ip_port_tostring(ih.saddr.to_be(),tcp.src.to_be()));
+    let status = get_status(&ip_port);
 
     if tcp.flags == SYN && status == STATUS_LISTEN {
         let dst = tcp.src;
@@ -160,7 +159,8 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
         tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,((tcp.offset >> 4) << 2) as u16);
         let mut buf = [&unsafe{any_as_u8_slice(&tcp)},&buf[20..]].concat();
         set_status(&ip_port, STATUS_RECV);
-        ip_send(nd, hdr, ih, &mut buf, IP_TCP);
+        ip_send(nd,ih.saddr,IP_TCP,&mut buf);
+
     } else if tcp.flags == ACK && (status == STATUS_RECV || status == STATUS_WAIT_ACK) {
         set_status(&ip_port, STATUS_ESTABLISHED);
         set_ack(&ip_port, tcp.ack);
@@ -181,11 +181,9 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
         let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
         tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
         let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
-        let mut addr = [ih.saddr,ih.daddr];
-        let mut shdr = (*hdr).clone();
-        ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
-        let mut s = ["123\n".as_bytes()].concat();
-        tcp_send(nd,&mut shdr,&mut addr,&mut s,port,&timestamp,ih.id);
+        ip_send(nd,ip,IP_TCP,&mut dbuf);
+        let buf = "test".as_bytes();
+        tcp_send(nd,ip,&buf,port,&mut timestamp);
     } else if tcp.flags == FIN | ACK && status == STATUS_ESTABLISHED {
         let dst = tcp.src;
         tcp.src = tcp.dst;
@@ -198,27 +196,23 @@ pub fn tcp_incoming(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8])
         //被动关闭
         let dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
         let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
-        tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
+        tcp.checksum = tcp_checksum(body,ih.daddr,ip,dbuf.len() as u16);
         let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
         set_status(&ip_port, STATUS_LISTEN);
-        ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
+        ip_send(nd,ip,IP_TCP,&mut dbuf);
 
         //主动关闭
-        //因为IP地址在上一个ip_send中已经被改变了，所以这里要重新设置IP地址
-        let daddr = ih.saddr;
-        ih.saddr = ih.daddr;
-        ih.daddr = daddr;
         tcp.flags = FIN | ACK;
         let dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
         let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
-        tcp.checksum = tcp_checksum(body,ih.daddr,ih.saddr,dbuf.len() as u16);
+        tcp.checksum = tcp_checksum(body,ih.daddr,ip,dbuf.len() as u16);
         let mut dbuf = [unsafe{any_as_u8_slice(&tcp)},tcp_opt].concat();
-        ip_send(nd,hdr,ih,&mut dbuf,IP_TCP);
+        ip_send(nd,ip,IP_TCP,&mut dbuf);
     }
 }
 
-pub fn tcp_send(nd:&mut netdev,hdr:&mut eth_hdr,addr:&[u32],buf:&mut [u8],port:u16,timestamp:&[u8],id:u16) {
-    let s = *tcp_status_machine.lock().unwrap().get(&ip_port_tostring(addr[0].to_be(),port)).unwrap();
+pub fn tcp_send(nd:&mut netdev,daddr:u32,buf:&[u8],port:u16,timestamp:&[u8]) {
+    let s = *TCP_STATUS_MACHINE.lock().unwrap().get(&ip_port_tostring(daddr.to_be(),port)).unwrap();
     let mut tcp_s = tcp{
         src: (80 as u16).to_be(),
         dst: s.port.to_be(),
@@ -230,22 +224,10 @@ pub fn tcp_send(nd:&mut netdev,hdr:&mut eth_hdr,addr:&[u32],buf:&mut [u8],port:u
         checksum: 0,
         urg:0
     };
-    let mut nop = [1u8;2];
+    let nop = [1u8;2];
     let dbuf = &[unsafe{any_as_u8_slice(&tcp_s)},&nop,timestamp,buf].concat();
     let (_head,body,_tail) = unsafe{dbuf.align_to::<u16>()};
-    tcp_s.checksum = tcp_checksum(body,addr[1],addr[0],dbuf.len() as u16);
+    tcp_s.checksum = tcp_checksum(body,nd.addr,daddr,dbuf.len() as u16);
     let mut dbuf = [unsafe{any_as_u8_slice(&tcp_s)},&nop,timestamp,buf].concat();
-    let mut ih = iphdr {
-        ver_and_ihl: 0,
-        tos: 0,
-        len:0,
-        id: id,
-        flag_and_offset: 0,
-        ttl: 64,
-        proto: IP_TCP,
-        csum: 0,
-        saddr: addr[0],
-        daddr: addr[1],
-    };
-    ip_send(nd,hdr,&mut ih,&mut dbuf,IP_TCP);
+    ip_send(nd,daddr,IP_TCP,&mut dbuf);
 }

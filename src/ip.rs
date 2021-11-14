@@ -3,6 +3,9 @@ pub use crate::tuntap::*;
 pub use crate::icmpv4::*;
 pub use crate::tuntap::*;
 pub use crate::tcp::*;
+pub use lazy_static::lazy_static;
+pub use std::sync::Mutex;
+
 #[repr(C, packed)]
 pub struct iphdr {
     pub ver_and_ihl:u8,
@@ -16,10 +19,26 @@ pub struct iphdr {
     pub saddr:u32,
     pub daddr:u32
 }
+impl Default for iphdr {
+    fn default() -> iphdr {
+        iphdr {
+            ver_and_ihl:0,
+            tos:0,
+            len:0,
+            id:0,
+            flag_and_offset:0,
+            ttl:64,
+            proto:0,
+            csum:0,
+            saddr:0,
+            daddr:0
+        }
+    }
+}
 const IPV4:u8 = 0x04;
 pub const IP_TCP:u8 = 0x06;
 pub const ICMPV4:u8 = 0x01;
-static mut id:u16 = 7890;
+static mut ID:u16 = 7890;
 impl iphdr {
     pub fn get_verison(&mut self) -> u8 {
         (self.ver_and_ihl & 0xf0) >> 4
@@ -44,7 +63,7 @@ impl iphdr {
     }
 }
 
-pub fn ip_recv(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
+pub fn ip_recv(nd:&mut netdev,buf:&mut [u8]) {
     let s = sizeof::<iphdr>() as usize;
     let mut ip_hdr = unsafe{mem::transmute::<[u8;20],iphdr>(*arrayref::array_ref![buf,0,20])};
     if ip_hdr.get_verison() != IPV4 {
@@ -67,28 +86,30 @@ pub fn ip_recv(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
     }
     ip_hdr.len = ip_hdr.len.to_be();
     match ip_hdr.proto {
-        ICMPV4 => icmpv4_incoming(nd,hdr,&mut ip_hdr,&mut buf[s..]),
-        IP_TCP => tcp_incoming(nd,hdr,&mut ip_hdr,&mut buf[s..]),
+        ICMPV4 => icmpv4_incoming(nd,&mut ip_hdr,&mut buf[s..]),
+        IP_TCP => tcp_incoming(nd,&mut ip_hdr,&mut buf[s..]),
         _ => println!("protoctl no!")
     }
 }
 
-pub fn ip_send(nd:&mut netdev,hdr:&mut eth_hdr,ih:&mut iphdr,buf:&mut [u8],proto:u8) {
+pub fn ip_send(nd:&mut netdev,daddr:u32,proto:u8,buf:&mut [u8]) {
+    let mut ih:iphdr = Default::default();
     ih.set_ihl(0x05);
-    ih.tos = 0;
-    ih.len = sizeof::<iphdr>() as u16 + buf.len() as u16;
+    ih.len = (sizeof::<iphdr>() as usize + buf.len()) as u16;
     ih.set_offset(0x4000);
-    ih.ttl = 64;
     ih.proto = proto;
-    unsafe{ih.id = id;}
-    ih.id = ih.id.to_be();
-    unsafe{id += 1;}
-    let daddr = ih.saddr;
-    ih.saddr = ih.daddr;
+
+    unsafe {
+        ih.id = ID;
+        ih.id = ih.id.to_be();
+        ID += 1;
+    }
+
+    ih.saddr = nd.addr;
     ih.daddr = daddr;
     ih.len = ih.len.to_be();
-    ih.csum = 0;
+
     ih.flag_and_offset = ih.flag_and_offset.to_be();
-    ih.csum = checksum(unsafe{any_as_u16_slice(ih)}, 20,0);
-    nd.transmit(hdr,libc::ETH_P_IP as u16,&[unsafe{any_as_u8_slice(ih)},buf].concat());
+    ih.csum = checksum(unsafe{any_as_u16_slice(&ih)}, 20,0);
+    nd.transmit(libc::ETH_P_IP as u16,&[unsafe{any_as_u8_slice(&ih)},buf].concat(),daddr);
 }

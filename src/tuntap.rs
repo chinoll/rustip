@@ -7,6 +7,7 @@ pub use nix::sys::ioctl;
 pub use libc::c_void;
 pub use std::{io::Error,ffi::CString,mem,process::Command};
 pub use crate::utils::*;
+pub use crate::arp::ip_to_mac;
 extern {
     fn netdev_init(dev:*mut netdev,addr:*const libc::c_char,hwaddr:*const libc::c_char);
 }
@@ -53,14 +54,13 @@ impl netdev {
         unsafe{libc::write(self.netfd,buf as *const _ as *const libc::c_void,len as usize).try_into().unwrap()}
     }
     
-    pub fn transmit(&mut self,hdr:&mut eth_hdr,ethertype:u16,frame:&Vec<u8>) {
-        
+    pub fn transmit(&mut self,ethertype:u16,frame:&Vec<u8>,dip:u32) {
+        let mut hdr:eth_hdr = Default::default();
         hdr.ethertype = ethertype.to_be();
-        let smac = hdr.smac;
         hdr.smac.copy_from_slice(&self.hwaddr);
-        hdr.dmac.copy_from_slice(&smac);
+        hdr.dmac.copy_from_slice(&ip_to_mac(dip).unwrap());
         let mut eth_frame = Vec::new();
-        eth_frame.extend_from_slice(unsafe{any_as_u8_slice(hdr)});
+        eth_frame.extend_from_slice(unsafe{any_as_u8_slice(&hdr)});
         eth_frame.extend(frame);
         self.tun_write(&eth_frame,eth_frame.len() as u32);
     }
@@ -72,6 +72,15 @@ pub struct eth_hdr {
     pub dmac:[u8;6],
     pub smac:[u8;6],
     pub ethertype:u16
+}
+impl Default for eth_hdr {
+    fn default() -> eth_hdr {
+        eth_hdr {
+            dmac:[0;6],
+            smac:[0;6],
+            ethertype:0
+        }
+    }
 }
 
 pub fn parse_frame_to_eth(buf:&[u8]) -> eth_hdr {

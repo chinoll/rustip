@@ -13,8 +13,8 @@ pub use crate::utils::*;
 fn handle_frame(nd:&mut netdev,hdr:&mut eth_hdr,buf:&mut [u8]) {
     let t = hdr.ethertype as i32;
     match t {
-        libc::ETH_P_ARP => arp_incoming(nd,hdr,buf),
-        libc::ETH_P_IP => ip_recv(nd,hdr,buf),
+        libc::ETH_P_ARP => arp_incoming(nd,buf),
+        libc::ETH_P_IP => ip_recv(nd,buf),
         _ => println!("Unrecognized ethertype {:?}\n", hdr.ethertype)
     }
 }
