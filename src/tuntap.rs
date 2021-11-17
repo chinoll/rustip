@@ -60,7 +60,7 @@ impl netdev {
         hdr.smac.copy_from_slice(&self.hwaddr);
         hdr.dmac.copy_from_slice(&ip_to_mac(dip).unwrap());
         let mut eth_frame = Vec::new();
-        eth_frame.extend_from_slice(unsafe{any_as_u8_slice(&hdr)});
+        eth_frame.extend_from_slice(any_as_u8_slice(&hdr));
         eth_frame.extend(frame);
         self.tun_write(&eth_frame,eth_frame.len() as u32);
     }

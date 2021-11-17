@@ -80,8 +80,8 @@ pub fn ip_recv(nd:&mut netdev,buf:&mut [u8]) {
         return;
     }
     let x = ip_hdr.get_ihl() as u16;
-    if checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4,0) != 0 {
-        println!("checksum error {:?} {:?}",checksum(unsafe{any_as_u16_slice(&ip_hdr)},x * 4,0),ip_hdr.csum);
+    if checksum(any_as_u16_slice(&ip_hdr),x * 4,0) != 0 {
+        println!("checksum error {:?} {:?}",checksum(any_as_u16_slice(&ip_hdr),x * 4,0),ip_hdr.csum);
         return;
     }
     ip_hdr.len = ip_hdr.len.to_be();
@@ -92,7 +92,7 @@ pub fn ip_recv(nd:&mut netdev,buf:&mut [u8]) {
     }
 }
 
-pub fn ip_send(nd:&mut netdev,daddr:u32,proto:u8,buf:&mut [u8]) {
+pub fn ip_send(nd:&mut netdev,daddr:u32,proto:u8,buf:&[u8]) {
     let mut ih:iphdr = Default::default();
     ih.set_ihl(0x05);
     ih.len = (sizeof::<iphdr>() as usize + buf.len()) as u16;
@@ -110,6 +110,6 @@ pub fn ip_send(nd:&mut netdev,daddr:u32,proto:u8,buf:&mut [u8]) {
     ih.len = ih.len.to_be();
 
     ih.flag_and_offset = ih.flag_and_offset.to_be();
-    ih.csum = checksum(unsafe{any_as_u16_slice(&ih)}, 20,0);
-    nd.transmit(libc::ETH_P_IP as u16,&[unsafe{any_as_u8_slice(&ih)},buf].concat(),daddr);
+    ih.csum = checksum(any_as_u16_slice(&ih), 20,0);
+    nd.transmit(libc::ETH_P_IP as u16,&[any_as_u8_slice(&ih),buf].concat(),daddr);
 }

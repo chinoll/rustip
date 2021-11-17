@@ -47,11 +47,10 @@ fn insert_arp_translation_table(arphdr:&arp_hdr,data:&arp_ipv4) {
         smac:[0;6]
     };
     arp.smac.copy_from_slice(&data.smac);
-    println!("arp:{}",ip_port_tostring(data.sip.to_be(),(80 as u16).to_be()));
     ARP_ENTRY.lock().unwrap().entry(data.sip).or_insert(arp);
 }
+
 pub fn ip_to_mac(sip:u32) -> Option<[u8;6]> {
-    println!("qarp:{}",ip_port_tostring(sip,(80 as u16).to_be()));
     match ARP_ENTRY.lock().unwrap().get(&sip) {
         Some(i) => Some(i.smac),
         None => None
@@ -69,8 +68,8 @@ fn arp_reply(nd:&mut netdev,arphdr:&mut arp_hdr,arpdata:&mut arp_ipv4) {
     arphdr.hwtype = arphdr.hwtype.to_be();
     arphdr.protype = arphdr.protype.to_be();
     let mut frame = Vec::new();
-    frame.extend_from_slice(unsafe{any_as_u8_slice(arphdr)});
-    frame.extend_from_slice(unsafe{any_as_u8_slice(arpdata)});
+    frame.extend_from_slice(any_as_u8_slice(arphdr));
+    frame.extend_from_slice(any_as_u8_slice(arpdata));
     nd.transmit(libc::ETH_P_ARP.try_into().expect("Error"),&frame,arpdata.dip);
 }
 

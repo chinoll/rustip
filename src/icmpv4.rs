@@ -33,6 +33,6 @@ pub fn icmpv4_reply(nd:&mut netdev,ih:&mut iphdr,daddr:u32,icmp:&mut icmpv4,buf:
     icmp.csum = checksum(&[&unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)},body].concat(), ih.len - (ih.get_ihl() as u16 * 4),0);
 
     let icmp_echo = unsafe{mem::transmute::<icmpv4,[u16;2]>(*icmp)};
-    let mut frame = [unsafe{any_as_u8_slice(&icmp_echo)},buf].concat();
+    let mut frame = [any_as_u8_slice(&icmp_echo),buf].concat();
     ip_send(nd,daddr,ICMPV4,&mut frame);
 }
