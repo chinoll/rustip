@@ -39,13 +39,11 @@ pub fn tcp_checksum(data:&[u8],saddr:u32,daddr:u32,len:u16) -> u16 {
     let sum:u32 = saddr + daddr + (0x06 as u16).to_be() as u32 + len.to_be() as u32;
     if data.len() % 2 == 1{
         // odd
-        println!("odd");
         let mut tmp = Vec::from(data);
         tmp.push(0 as u8);
         let (_head,body,_tail) = unsafe{tmp.as_slice().align_to::<u16>()};
         return checksum(&body,len+1,sum);
     } else {
-        println!("even,{},{}",len,data.len());
         let (_head,body,_tail) = unsafe{data.align_to::<u16>()};
         return checksum(&body,len,sum);
     }

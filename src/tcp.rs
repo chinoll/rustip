@@ -6,38 +6,8 @@ pub use lazy_static::lazy_static;
 pub use std::sync::Mutex;
 pub use std::{thread, time::Duration};
 pub use std::collections::HashMap;
+pub use std::cell::RefCell;
 
-#[repr(C,packed)]
-#[derive(Debug)]
-pub struct tcp {
-    pub src: u16,
-    pub dst: u16,
-    pub seq: u32,
-    pub ack: u32,
-    pub offset: u8,
-    pub flags: u8,
-    pub window: u16,
-    pub checksum: u16,
-    pub urg: u16,
-}
-pub union Option {
-    pub eol: u8,
-    pub nop: u8,
-    pub mss:[u8;3],
-    pub wscale: [u8;2],
-    pub timestamp: [u8; 9],
-}
-pub struct TcpOption {
-    pub kind: u8,
-    pub option: Option
-}
-#[derive(Copy,Clone,Debug)]
-pub struct TcpSeqAck {
-    seq:u32,
-    ack:u32,
-    status:u8,
-    port:u16
-}
 const STATUS_RECV:u8 = 1;
 const _STATUS_SYN_SEND:u8 = 2;
 const STATUS_ESTABLISHED:u8 = 3;
@@ -60,15 +30,128 @@ const _URG:u8 = 0x20;
 
 const PORT_OPEN:u8 = 0;
 const PORT_CLOSED:u8 = 1;
+
+#[repr(C,packed)]
+#[derive(Debug)]
+pub struct tcp {
+    pub src: u16,
+    pub dst: u16,
+    pub seq: u32,
+    pub ack: u32,
+    pub offset: u8,
+    pub flags: u8,
+    pub window: u16,
+    pub checksum: u16,
+    pub urg: u16,
+}
+pub union NOption {
+    pub eol: u8,
+    pub nop: u8,
+    pub mss:[u8;3],
+    pub wscale: [u8;2],
+    pub timestamp: [u8; 9],
+}
+pub struct TcpOption {
+    pub kind: u8,
+    pub option: NOption
+}
+#[derive(Copy,Clone,Debug)]
+pub struct TcpSeqAck {
+    seq:u32,
+    ack:u32,
+    status:u8,
+    port:u16
+}
+#[derive(Clone,Debug)]
+pub struct TcpSeqBuffer {
+    seq:u32,
+    buffer:Vec<u8>,
+}
+#[derive(Clone,Debug)]
+pub struct TcpBuffer {
+    buffer_size:u32,
+    left_size:u32,
+    buffer:Vec<TcpSeqBuffer>,
+}
+
+impl TcpBuffer {
+    pub fn new(buffer_size:u32) -> TcpBuffer {
+        TcpBuffer {
+            buffer_size,
+            left_size:buffer_size,
+            buffer:Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self,seq:u32,data:&[u8]) -> bool {
+        if self.left_size < data.len() as u32 {
+            return false;
+        }
+        self.left_size -= data.len() as u32;
+        let mut seq_buffer = TcpSeqBuffer {
+            seq,
+            buffer:[data].concat(),
+        };
+        if self.buffer.len() == 0 {
+            let mut watch_seq = TcpSeqBuffer{
+                seq:4294967295,
+                buffer:Vec::new(),
+            };
+            self.buffer.push(watch_seq);
+            self.buffer.insert(0,seq_buffer);
+            return true;
+        }
+
+        for i in 0..(self.buffer.len() - 1) {
+            if self.buffer[i].seq  < seq  && self.buffer[i + 1].seq >= (seq + data.len() as u32) {
+                self.buffer.insert(i + 1,seq_buffer);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn get_buffer_size(&self) -> u32 {
+        self.buffer_size
+    }
+
+    pub fn pop(&mut self,size:u32) -> Option<Vec<u8>> {
+        let mut result = None;
+        let mut j = Vec::new();
+        let mut total_size:u32 = 0;
+        for i in 0..(self.buffer.len() - 1) {
+            if (total_size + self.buffer[i].buffer.len() as u32) < size.try_into().unwrap() {
+                let packet_size = self.buffer[i].buffer.len();
+                j.push(self.buffer[i].buffer.clone());
+                self.buffer.remove(i);
+                self.left_size += packet_size as u32;
+                total_size += packet_size as u32;
+            } else {
+                break;
+            }
+        }
+        if j.len() > 0 {
+            result = Some(j.concat());
+        }
+        result
+    }
+    pub fn show(&self) {
+        for i in 0..(self.buffer.len() - 1) {
+            println!("seq:{},{:?}",self.buffer[i].seq,self.buffer[i].buffer);
+        }
+    }
+}
+
 lazy_static! {
     static ref TCP_STATUS_MACHINE:Mutex<HashMap<String,TcpSeqAck>> = Mutex::new(HashMap::new());
     static ref PORT_STATUS:Mutex<HashMap<u16,u8>> = Mutex::new(HashMap::new());
+    static ref PORT_BUFFER:Mutex<HashMap<u16,RefCell<TcpBuffer>>> = Mutex::new(HashMap::new());
 }
 fn get_port_status(port:u16) -> u8 {
     PORT_STATUS.lock().unwrap().get(&port).unwrap_or(&PORT_CLOSED).clone()
 }
 
-fn set_port_status(port:u16,status:u8) {
+pub fn set_port_status(port:u16,status:u8) {
     PORT_STATUS.lock().unwrap().insert(port,status);
 }
 
@@ -108,11 +191,24 @@ fn get_port(s:&String) -> u16 {
     TCP_STATUS_MACHINE.lock().unwrap().get(s).unwrap().port
 }
 
+fn set_buffer(port:u16,data:&mut [u8],seq:u32) {
+    PORT_BUFFER.lock().unwrap().get(&port).unwrap().borrow_mut().push(seq,data);
+    PORT_BUFFER.lock().unwrap().get(&port).unwrap().borrow_mut().show();
+}
+
+fn new_buffer(port:u16,size:u32) {
+    PORT_BUFFER.lock().unwrap().insert(port,RefCell::new(TcpBuffer{buffer_size:size,left_size:size,buffer:Vec::new()}));
+}
+
 fn tcp_accept(nd:&mut netdev,tcp_packet:&mut tcp,ip:u32,daddr:u32,port:u16,buf:&[u8]) {
     let ip_port = ip_port_tostring(ip.to_be(),port);
     let status = get_status(&ip_port);
+    set_port_status(80,PORT_OPEN);
     if tcp_packet.flags == SYN && status == STATUS_LISTEN {
         let dst = tcp_packet.src;
+
+        new_buffer(tcp_packet.dst.to_be(),tcp_packet.window as u32 * 128);
+
         tcp_packet.src = tcp_packet.dst;
         tcp_packet.dst = dst;
         tcp_packet.ack = (tcp_packet.seq.to_be() + 1).to_be();
@@ -127,9 +223,10 @@ fn tcp_accept(nd:&mut netdev,tcp_packet:&mut tcp,ip:u32,daddr:u32,port:u16,buf:&
             tcp_packet.seq = 0;
             tcp_packet.flags = RST | ACK;
         }
-        let tcp_mss = TcpOption{kind:2,option:Option{mss:[0x04,0x05,0xb4]}};
-        let tcp_wscale = TcpOption{kind:3,option:Option{wscale:[0x03,0x07]}};
-        let tcp_nop = TcpOption{kind:0,option:Option{nop:0}};
+
+        let tcp_mss = TcpOption{kind:2,option:NOption{mss:[0x04,0x05,0xb4]}};
+        let tcp_wscale = TcpOption{kind:3,option:NOption{wscale:[0x03,0x07]}};
+        let tcp_nop = TcpOption{kind:0,option:NOption{nop:0}};
         let buf = [ &any_as_u8_slice(tcp_packet),
                     &any_as_u8_slice(&tcp_mss)[..4],
                     &any_as_u8_slice(&tcp_wscale)[..3],
@@ -149,18 +246,22 @@ fn tcp_accept(nd:&mut netdev,tcp_packet:&mut tcp,ip:u32,daddr:u32,port:u16,buf:&
         let dst = tcp_packet.src;
         tcp_packet.src = tcp_packet.dst;
         tcp_packet.dst = dst;
-        let data_len = buf[((tcp_packet.offset >> 4) << 2) as usize..].len() as u32;
+
+        let mut data = [&buf[((tcp_packet.offset >> 4) << 2) as usize..]].concat();
+        set_buffer(tcp_packet.src.to_be(),&mut data,tcp_packet.seq.to_be());
+
         let ack = tcp_packet.ack;
-        tcp_packet.ack = (tcp_packet.seq.to_be() + data_len).to_be();
+        tcp_packet.ack = (tcp_packet.seq.to_be() + data.len() as u32).to_be();
         tcp_packet.seq = ack;
         tcp_packet.flags = ACK;
         tcp_packet.checksum = 0;
         tcp_packet.offset = 0x50;
+
         set_ack(&ip_port, tcp_packet.ack);
         set_seq(&ip_port, tcp_packet.seq);
         let dbuf = any_as_u8_slice(tcp_packet);
         tcp_packet.checksum = tcp_checksum(dbuf,daddr,ip,20 as u16);
-        let mut dbuf = [any_as_u8_slice(tcp_packet)].concat();
+        let dbuf = [any_as_u8_slice(tcp_packet)].concat();
         ip_send(nd,ip,IP_TCP,&dbuf);
 
     } else if tcp_packet.flags == FIN | ACK && status == STATUS_ESTABLISHED {
@@ -199,7 +300,7 @@ pub fn tcp_incoming(nd:&mut netdev,ih:&mut iphdr,buf:&mut [u8]) {
     set_port(&ip_port, port);
     //跳过TCP选项
     while tcp_opt_ptr < tcp_opt_len {
-        let mut tcp_opti = Box::new(TcpOption{kind:0,option:Option{eol:0}});
+        let mut tcp_opti = Box::new(TcpOption{kind:0,option:NOption{eol:0}});
         unsafe {
             match tcp_opt[tcp_opt_ptr as usize] {
                 1 => {
